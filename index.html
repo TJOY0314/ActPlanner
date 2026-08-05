@@ -1,0 +1,1029 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>연극 동선 기획 시뮬레이터</title>
+    <!-- 압축을 위한 pako 라이브러리 로드 -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/pako/2.1.0/pako.min.js"></script>
+    <style>
+        :root {
+            --primary: #4a90e2;
+            --danger: #ff4757;
+            --bg-color: #f5f7fa;
+            --panel-bg: #ffffff;
+            --border: #dcdde1;
+            --grid-size: 40px;
+            --border-radius: 12px;
+        }
+        * { box-sizing: border-box; margin: 0; padding: 0; font-family: 'Pretendard', sans-serif; }
+        body { display: flex; flex-direction: column; height: 100vh; background: var(--bg-color); color: #333; overflow: hidden; }
+        
+        /* Header */
+        header { display: flex; justify-content: space-between; align-items: center; padding: 15px 25px; background: var(--panel-bg); border-bottom: 1px solid var(--border); box-shadow: 0 2px 10px rgba(0,0,0,0.05); z-index: 10; flex-shrink: 0; }
+        header h1 { font-size: 1.3rem; font-weight: 700; }
+        .top-controls { display: flex; gap: 10px; align-items: center; }
+        
+        /* Main Layout */
+        main { display: flex; flex: 1; overflow: hidden; }
+        .side-panel { width: 280px; background: var(--panel-bg); display: flex; flex-direction: column; padding: 20px; overflow-y: auto; flex-shrink: 0; }
+        #left-panel { border-right: 1px solid var(--border); border-radius: 0 var(--border-radius) var(--border-radius) 0; margin-right: 10px; }
+        #right-panel { border-left: 1px solid var(--border); border-radius: var(--border-radius) 0 0 var(--border-radius); margin-left: 10px; }
+        .center-stage { flex: 1; display: flex; flex-direction: column; position: relative; overflow: auto; align-items: center; justify-content: center; background: #e8ecf1; padding: 20px; border-radius: var(--border-radius); }
+        
+        /* Panels & Lists */
+        h2 { font-size: 1.1rem; margin-bottom: 15px; padding-bottom: 8px; border-bottom: 2px solid var(--border); }
+        .list-container { display: flex; flex-direction: column; gap: 10px; margin-bottom: 15px; }
+        
+        .item-card { padding: 12px; border: 1px solid var(--border); border-radius: var(--border-radius); cursor: pointer; display: flex; justify-content: space-between; align-items: center; background: #fff; transition: all 0.2s ease; }
+        .item-card:hover { transform: translateY(-1px); box-shadow: 0 2px 5px rgba(0,0,0,0.05); }
+        .item-card.active { border-color: var(--primary); box-shadow: 0 0 0 2px rgba(74,144,226,0.3); }
+        
+        .act-card { font-weight: bold; flex-direction: column; align-items: stretch; gap: 5px; }
+        .act-header { display: flex; justify-content: space-between; align-items: center; width: 100%; gap: 5px; }
+        .scene-card { margin-left: 20px; font-size: 0.9em; background: #f8f9fa; }
+        .scene-card::before { content: '└'; color: #aaa; margin-right: 5px; }
+        
+        .char-item-content { display: flex; align-items: center; gap: 10px; flex: 1; }
+        .char-color-dot { width: 16px; height: 16px; border-radius: 50%; box-shadow: 0 1px 3px rgba(0,0,0,0.2); }
+        .edit-input { width: 80px; padding: 4px; border: 1px solid var(--border); border-radius: 4px; font-family: inherit; font-size: inherit; }
+        
+        /* Buttons */
+        .btn { padding: 8px 14px; border: none; border-radius: 8px; cursor: pointer; background: #e0e6ed; font-size: 0.9rem; font-weight: 600; transition: background 0.2s; display: flex; align-items: center; justify-content: center; gap: 5px; }
+        .btn:hover { background: #d1d8e0; }
+        .btn-primary { background: var(--primary); color: white; }
+        .btn-primary:hover { background: #357abd; }
+        .btn-danger { color: var(--danger); background: transparent; }
+        .btn-danger:hover { background: #ffeaa7; }
+        .btn-icon { padding: 4px; font-size: 0.8rem; border-radius: 6px; background: transparent; border: 1px solid var(--border); cursor: pointer; display: flex; align-items: center; justify-content: center; }
+        .btn-icon:hover { background: #eee; }
+        
+        /* Stage & Grid */
+        .stage-controls { position: absolute; top: 15px; left: 15px; display: flex; gap: 15px; background: rgba(255,255,255,0.95); padding: 12px 20px; border-radius: var(--border-radius); box-shadow: 0 4px 15px rgba(0,0,0,0.08); z-index: 10; backdrop-filter: blur(5px); }
+        .stage-controls label { display: flex; align-items: center; gap: 5px; font-size: 0.9rem; font-weight: 600; }
+        .stage-controls input, .stage-controls select { padding: 6px; border-radius: 6px; border: 1px solid var(--border); }
+        
+        .stage-wrapper { position: relative; background: #fff; box-shadow: 0 8px 25px rgba(0,0,0,0.1); border: 2px solid #ccc; border-radius: 8px; overflow: hidden; flex-shrink: 0; margin: auto; }
+        .grid-canvas { position: absolute; top: 0; left: 0; pointer-events: none; }
+        .interaction-layer { position: absolute; top: 0; left: 0; width: 100%; height: 100%; cursor: crosshair; }
+        
+        /* Characters on Stage */
+        .char-marker { position: absolute; width: 32px; height: 32px; border-radius: 50%; border: 2px solid #fff; box-shadow: 0 2px 6px rgba(0,0,0,0.3); transform: translate(-50%, -50%); display: flex; align-items: center; justify-content: center; font-size: 0.75rem; font-weight: bold; color: white; cursor: pointer; text-shadow: 1px 1px 2px rgba(0,0,0,0.8); z-index: 20; transition: left 0.4s cubic-bezier(0.25, 1, 0.5, 1), top 0.4s cubic-bezier(0.25, 1, 0.5, 1), opacity 0.3s ease; }
+        .char-marker.selected { box-shadow: 0 0 0 3px rgba(255, 59, 48, 0.8), 0 4px 10px rgba(0,0,0,0.3); z-index: 25; }
+        
+        /* Speech Bubble & Object Action Panel */
+        .speech-bubble { position: absolute; bottom: 130%; left: 50%; transform: translateX(-50%); background: white; border: 2px solid #333; border-radius: var(--border-radius); padding: 12px; width: 220px; box-shadow: 0 6px 15px rgba(0,0,0,0.15); z-index: 30; display: none; color: #333; cursor: default; }
+        .speech-bubble::after { content: ''; position: absolute; top: 100%; left: 50%; margin-left: -8px; border-width: 8px; border-style: solid; border-color: #333 transparent transparent transparent; }
+        .speech-bubble textarea { width: 100%; height: 50px; resize: none; margin-bottom: 8px; font-family: inherit; border: 1px solid var(--border); border-radius: 6px; padding: 5px; font-size: 0.85rem; }
+        .speech-bubble textarea:focus { outline: none; border-color: var(--primary); }
+        .speech-bubble.active { display: block; }
+        
+        .bubble-actions { display: flex; justify-content: space-between; align-items: center; gap: 5px; }
+        
+        /* Curtain Floating Toolbar (Speech Bubble Style) */
+        .curtain-toolbar { position: absolute; transform: translate(-50%, calc(-100% - 12px)); background: white; border: 2px solid #333; border-radius: var(--border-radius); padding: 12px; box-shadow: 0 6px 15px rgba(0,0,0,0.15); z-index: 30; display: none; text-align: center; width: 200px; color: #333; cursor: default; }
+        .curtain-toolbar::after { content: ''; position: absolute; top: 100%; left: 50%; margin-left: -8px; border-width: 8px; border-style: solid; border-color: #333 transparent transparent transparent; }
+        .curtain-toolbar.active { display: block; }
+
+        .mini-bubble { position: absolute; top: -12px; right: -12px; background: white; border: 2px solid #333; border-radius: 50%; width: 22px; height: 22px; display: none; cursor: pointer; font-size: 11px; align-items: center; justify-content: center; box-shadow: 0 2px 4px rgba(0,0,0,0.2); }
+        .char-marker.has-note .mini-bubble { display: flex; }
+        
+        /* Bottom Controls */
+        footer { background: var(--panel-bg); padding: 15px 30px; display: flex; justify-content: space-between; align-items: center; box-shadow: 0 -2px 10px rgba(0,0,0,0.05); z-index: 10; flex-shrink: 0; }
+        .play-controls { display: flex; align-items: center; gap: 15px; }
+        .control-btns { display: flex; gap: 15px; }
+        .control-btns button { font-size: 1.1rem; padding: 10px 20px; border-radius: 30px; }
+        
+        /* Helper Text */
+        .helper-text { font-size: 0.8rem; color: #7f8fa6; margin-top: 15px; line-height: 1.5; background: #f8f9fa; padding: 10px; border-radius: 8px; }
+
+        /* Responsive Design (Mobile / Tablet) */
+        @media (max-width: 900px) {
+            body { height: auto; overflow: visible; }
+            header { flex-direction: column; gap: 15px; }
+            main { flex-direction: column; overflow: visible; }
+            .side-panel { width: 100%; margin: 0; border: none; border-bottom: 1px solid var(--border); border-radius: 0; max-height: 400px; }
+            #left-panel, #right-panel { border-radius: 0; }
+            .center-stage { min-height: 70vh; padding: 10px; padding-top: 70px; align-items: flex-start; justify-content: flex-start; }
+            .stage-controls { top: 10px; left: 10px; right: 10px; flex-wrap: wrap; justify-content: center; font-size: 0.8rem; padding: 10px; }
+            footer { flex-direction: column; gap: 15px; }
+            .play-controls { flex-direction: column; width: 100%; }
+            #btn-prev, #btn-next { width: 100%; }
+        }
+    </style>
+</head>
+<body>
+
+    <header>
+        <h1>🎭 연극 동선 기획 시뮬레이터</h1>
+        <div class="top-controls">
+            <button class="btn btn-icon" onclick="undo()" title="실행 취소 (Ctrl+Z)" style="font-size: 1.2rem; padding: 5px 10px;">↩️</button>
+            <button class="btn btn-icon" onclick="redo()" title="다시 실행 (Ctrl+Shift+Z)" style="font-size: 1.2rem; padding: 5px 10px; margin-right: 15px;">↪️</button>
+            <button class="btn btn-primary" onclick="shareData()">🔗 공유하기 (URL 내보내기)</button>
+        </div>
+    </header>
+
+    <main>
+        <!-- 좌측: 막/장면 패널 -->
+        <aside class="side-panel" id="left-panel">
+            <h2>막 / 장면 목록</h2>
+            <div id="script-list" class="list-container"></div>
+            <div style="display:flex; gap:5px;">
+                <button class="btn" style="flex:1;" onclick="addAct()">+ 막 추가</button>
+                <button class="btn" style="flex:1;" onclick="addScene()">+ 장면 추가</button>
+            </div>
+        </aside>
+
+        <!-- 중앙: 동선 편집 창 -->
+        <section class="center-stage" id="center-stage">
+            <div class="stage-controls">
+                <label>가로 격자: <input type="number" id="grid-cols" value="15" min="5" max="30" onchange="updateGridSize()"></label>
+                <label>세로 격자: <input type="number" id="grid-rows" value="10" min="5" max="30" onchange="updateGridSize()"></label>
+                <select id="stage-mode" style="font-weight:bold;">
+                    <option value="place">🏃‍♂️ 인물/선택 모드</option>
+                    <option value="draw">🚧 가림막 그리기 모드</option>
+                </select>
+            </div>
+            
+            <div class="stage-wrapper" id="stage-wrapper">
+                <canvas class="grid-canvas" id="grid-canvas"></canvas>
+                <div class="interaction-layer" id="interaction-layer"></div>
+                <div id="characters-layer"></div>
+                
+                <!-- 가림막 선택시 나타나는 말풍선 툴바 -->
+                <div id="curtain-toolbar" class="curtain-toolbar" onclick="event.stopPropagation()">
+                    <div id="curtain-normal-view">
+                        <div style="font-size:0.85rem; font-weight:bold; margin-bottom:8px;">가림막 선택됨</div>
+                        <button class="btn btn-danger" style="width:100%; font-size:0.85rem;" onclick="showCurtainDeleteConfirm(true)">🗑️ 가림막 삭제</button>
+                    </div>
+                    <div id="curtain-confirm-view" style="display:none; text-align:center; padding:2px 0;">
+                        <p style="color:var(--danger); font-weight:600; font-size:0.85rem; margin-bottom:8px;">정말 삭제하시겠습니까?</p>
+                        <div style="display:flex; gap:6px; justify-content:center;">
+                            <button class="btn" style="padding:4px 10px; font-size:0.8rem;" onclick="showCurtainDeleteConfirm(false)">취소</button>
+                            <button class="btn btn-primary" style="padding:4px 10px; font-size:0.8rem; background:var(--danger);" onclick="deleteSelectedObject()">삭제</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- 우측: 등장인물 패널 -->
+        <aside class="side-panel" id="right-panel">
+            <h2>등장인물</h2>
+            <div id="char-list" class="list-container"></div>
+            <div style="display:flex; flex-direction:column; gap:8px; margin-top:10px; border-top:1px solid var(--border); padding-top:15px;">
+                <input type="text" id="new-char-name" placeholder="새 인물 이름" style="padding:8px; border-radius:6px; border:1px solid var(--border);">
+                <div style="display:flex; gap:10px; align-items:center;">
+                    <input type="color" id="new-char-color" value="#ff3b30" style="width:40px; height:35px; border:none; cursor:pointer;">
+                    <button class="btn" style="flex:1;" onclick="addCharacter()">+ 인물 추가</button>
+                </div>
+            </div>
+            <div class="helper-text">
+                • <b>오브젝트 삭제:</b> 터치하여 선택 후 말풍선 내 🗑️ 버튼<br>
+                • <b>가림막:</b> 해당 막(Act) 전체에 적용됩니다.
+            </div>
+        </aside>
+    </main>
+
+    <!-- 하단: 재생 컨트롤 -->
+    <footer>
+        <button class="btn" onclick="prevScene()" id="btn-prev">◀ 이전 장면</button>
+        <div class="play-controls">
+            <label style="font-size: 0.9rem; font-weight:600;">재생 주기: <input type="number" id="play-interval" value="2" min="1" max="10" style="width: 50px; padding:4px; border-radius:4px; border:1px solid var(--border);">초</label>
+            <button class="btn btn-primary control-btns" onclick="togglePlay()" id="btn-play">▶ 재생</button>
+        </div>
+        <button class="btn" onclick="nextScene()" id="btn-next">다음 장면 ▶</button>
+    </footer>
+
+    <script>
+        // --- 상태 관리 (Data Structure) ---
+        let appData = {
+            acts: [], 
+            characters: [] 
+        };
+        
+        let currentActId = null;
+        let currentSceneId = null;
+        let selectedCharId = null; 
+        let activeBubbleCharId = null;
+        let showCharDeleteConfirmState = false;
+        let showCurtainDeleteConfirmState = false;
+        
+        // 상태 (Interaction State)
+        let drawStartPoint = null;
+        let mouseHoverGrid = null;
+        let selectedObject = null; 
+        
+        let playIntervalId = null;
+        
+        // Undo / Redo Stacks
+        let undoStack = [];
+        let redoStack = [];
+
+        // --- 초기화 및 URL 데이터 로드 ---
+        window.onload = () => {
+            loadFromUrl();
+            if (appData.acts.length === 0) {
+                appData.acts.push({ id: generateId(), name: '1막', collapsed: false, curtains: [], scenes: [{ id: generateId(), name: '1장', placements: {} }] });
+                currentActId = appData.acts[0].id;
+                currentSceneId = appData.acts[0].scenes[0].id;
+            }
+            setupEventListeners();
+            renderAll();
+        };
+
+        function generateId() { return Math.random().toString(36).substr(2, 9); }
+
+        // --- Undo / Redo 및 단축키 로직 ---
+        function saveState() {
+            undoStack.push(JSON.stringify(appData));
+            if (undoStack.length > 50) undoStack.shift();
+            redoStack = []; 
+        }
+
+        function undo() {
+            if (undoStack.length > 0) {
+                redoStack.push(JSON.stringify(appData));
+                appData = JSON.parse(undoStack.pop());
+                resetEditorStates();
+                renderAll();
+            }
+        }
+
+        function redo() {
+            if (redoStack.length > 0) {
+                undoStack.push(JSON.stringify(appData));
+                appData = JSON.parse(redoStack.pop());
+                resetEditorStates();
+                renderAll();
+            }
+        }
+
+        function resetEditorStates() {
+            selectedObject = null;
+            activeBubbleCharId = null;
+            showCharDeleteConfirmState = false;
+            showCurtainDeleteConfirmState = false;
+            editingActId = null;
+            editingSceneId = null;
+            editingCharId = null;
+            
+            if (!appData.acts.find(a => a.id === currentActId)) {
+                currentActId = appData.acts.length > 0 ? appData.acts[0].id : null;
+                currentSceneId = null;
+            }
+            const act = appData.acts.find(a => a.id === currentActId);
+            if (act && currentSceneId && !act.scenes.find(s => s.id === currentSceneId)) {
+                currentSceneId = act.scenes.length > 0 ? act.scenes[0].id : null;
+            }
+        }
+
+        function setupEventListeners() {
+            document.addEventListener('keydown', (e) => {
+                if (e.ctrlKey && e.shiftKey && (e.key === 'z' || e.key === 'Z')) {
+                    e.preventDefault(); redo();
+                } else if (e.ctrlKey && (e.key === 'z' || e.key === 'Z')) {
+                    e.preventDefault(); undo();
+                }
+                
+                // Delete / Backspace 키 삭제 로직 (PC용 백업)
+                if (e.key === 'Delete' || e.key === 'Backspace') {
+                    if (document.activeElement.tagName === 'INPUT' || document.activeElement.tagName === 'TEXTAREA') return;
+                    e.preventDefault();
+                    
+                    if (selectedObject) {
+                        deleteSelectedObject();
+                    } else if (currentSceneId) {
+                        if (confirm('현재 선택된 장면을 삭제하시겠습니까?')) {
+                            deleteScene(currentActId, currentSceneId);
+                        }
+                    } else if (currentActId) {
+                        if (confirm('현재 선택된 막을 삭제하시겠습니까? (하위 장면 모두 삭제됨)')) {
+                            deleteAct(currentActId);
+                        }
+                    }
+                }
+            });
+
+            // 마우스/터치 호버 (가림막 미리보기용)
+            const interactionLayer = document.getElementById('interaction-layer');
+            const handleMove = (e) => {
+                const rect = interactionLayer.getBoundingClientRect();
+                const clientX = e.touches ? e.touches[0].clientX : e.clientX;
+                const clientY = e.touches ? e.touches[0].clientY : e.clientY;
+                const gridX = Math.round((clientX - rect.left) / 40);
+                const gridY = Math.round((clientY - rect.top) / 40);
+                
+                if (!mouseHoverGrid || mouseHoverGrid.x !== gridX || mouseHoverGrid.y !== gridY) {
+                    mouseHoverGrid = { x: gridX, y: gridY };
+                    if (document.getElementById('stage-mode').value === 'draw' && drawStartPoint) {
+                        renderStage();
+                    }
+                }
+            };
+            
+            interactionLayer.addEventListener('mousemove', handleMove);
+            interactionLayer.addEventListener('touchmove', handleMove);
+            interactionLayer.addEventListener('click', handleStageClick);
+            interactionLayer.addEventListener('mouseleave', () => { mouseHoverGrid = null; renderStage(); });
+            
+            document.getElementById('stage-mode').addEventListener('change', () => {
+                drawStartPoint = null;
+                selectedObject = null;
+                activeBubbleCharId = null;
+                renderStage();
+            });
+        }
+
+        function deleteSelectedObject() {
+            if (!selectedObject) return;
+            saveState();
+            
+            if (selectedObject.type === 'char') {
+                const act = appData.acts.find(a => a.id === selectedObject.actId);
+                const scene = act?.scenes.find(s => s.id === selectedObject.sceneId);
+                if (scene && scene.placements[selectedObject.charId]) {
+                    delete scene.placements[selectedObject.charId];
+                }
+            } else if (selectedObject.type === 'curtain') {
+                const act = appData.acts.find(a => a.id === selectedObject.actId);
+                if (act) act.curtains = act.curtains.filter(c => c.id !== selectedObject.curtainId);
+            }
+            
+            selectedObject = null;
+            activeBubbleCharId = null;
+            showCharDeleteConfirmState = false;
+            showCurtainDeleteConfirmState = false;
+            renderStage();
+        }
+
+        function showCharDeleteConfirm(show) {
+            showCharDeleteConfirmState = show;
+            renderCharactersOnStage();
+        }
+
+        function showCurtainDeleteConfirm(show) {
+            showCurtainDeleteConfirmState = show;
+            const normalView = document.getElementById('curtain-normal-view');
+            const confirmView = document.getElementById('curtain-confirm-view');
+            if (show) {
+                normalView.style.display = 'none';
+                confirmView.style.display = 'block';
+            } else {
+                normalView.style.display = 'block';
+                confirmView.style.display = 'none';
+            }
+        }
+
+        // --- 좌측 패널 로직 (막/장면) ---
+        let editingActId = null;
+        let editingSceneId = null;
+
+        function addAct() {
+            saveState();
+            const act = { id: generateId(), name: `${appData.acts.length + 1}막`, collapsed: false, curtains: [], scenes: [] };
+            appData.acts.push(act);
+            currentActId = act.id;
+            currentSceneId = null;
+            renderScriptList();
+            renderStage();
+        }
+
+        function addScene() {
+            if (!currentActId) return alert("막을 먼저 추가/선택해주세요.");
+            saveState();
+            const act = appData.acts.find(a => a.id === currentActId);
+            const scene = { id: generateId(), name: `${act.scenes.length + 1}장`, placements: {} };
+            act.scenes.push(scene);
+            act.collapsed = false; 
+            currentSceneId = scene.id;
+            activeBubbleCharId = null;
+            selectedObject = null;
+            renderScriptList();
+            renderCharactersOnStage();
+        }
+
+        function deleteAct(actId) {
+            saveState();
+            appData.acts = appData.acts.filter(a => a.id !== actId);
+            if (currentActId === actId) {
+                currentActId = appData.acts.length > 0 ? appData.acts[0].id : null;
+                const newAct = getCurrentAct();
+                currentSceneId = (newAct && newAct.scenes.length > 0) ? newAct.scenes[0].id : null;
+            }
+            editingActId = null;
+            renderAll();
+        }
+
+        function deleteScene(actId, sceneId) {
+            saveState();
+            const act = appData.acts.find(a => a.id === actId);
+            if (act) {
+                act.scenes = act.scenes.filter(s => s.id !== sceneId);
+                if (currentSceneId === sceneId) {
+                    currentSceneId = act.scenes.length > 0 ? act.scenes[0].id : null;
+                }
+            }
+            editingSceneId = null;
+            renderAll();
+        }
+
+        function toggleActCollapse(actId, e) {
+            e.stopPropagation();
+            const act = appData.acts.find(a => a.id === actId);
+            if (act) {
+                act.collapsed = !act.collapsed;
+                currentActId = actId;
+                renderScriptList();
+            }
+        }
+
+        function selectAct(actId) {
+            currentActId = actId;
+            currentSceneId = null;
+            selectedObject = null;
+            renderScriptList();
+            renderStage();
+        }
+
+        function selectScene(actId, sceneId) {
+            currentActId = actId;
+            currentSceneId = sceneId;
+            activeBubbleCharId = null;
+            selectedObject = null;
+            renderScriptList();
+            renderStage();
+        }
+
+        function startActEdit(id, e) { e.stopPropagation(); editingActId = id; renderScriptList(); }
+        
+        function saveActEdit(id, e) {
+            e.stopPropagation();
+            const input = document.getElementById(`edit-act-${id}`);
+            if(input.value.trim() === '') return alert("이름을 입력하세요.");
+            saveState();
+            appData.acts.find(a => a.id === id).name = input.value;
+            editingActId = null;
+            renderScriptList();
+        }
+
+        function startSceneEdit(id, e) { e.stopPropagation(); editingSceneId = id; renderScriptList(); }
+
+        function saveSceneEdit(actId, sceneId, e) {
+            e.stopPropagation();
+            const input = document.getElementById(`edit-scene-${sceneId}`);
+            if(input.value.trim() === '') return alert("이름을 입력하세요.");
+            saveState();
+            appData.acts.find(a => a.id === actId).scenes.find(s => s.id === sceneId).name = input.value;
+            editingSceneId = null;
+            renderScriptList();
+        }
+
+        function renderScriptList() {
+            const container = document.getElementById('script-list');
+            container.innerHTML = '';
+            appData.acts.forEach(act => {
+                const actDiv = document.createElement('div');
+                actDiv.className = `item-card act-card ${act.id === currentActId && !currentSceneId ? 'active' : ''}`;
+                
+                if (editingActId === act.id) {
+                    actDiv.innerHTML = `
+                        <div class="act-header">
+                            <input type="text" id="edit-act-${act.id}" value="${act.name}" class="edit-input" style="flex:1;" onclick="event.stopPropagation()">
+                            <button class="btn-icon btn-danger" onclick="deleteAct('${act.id}')" title="막 삭제">🗑️</button>
+                            <button class="btn-icon" onclick="saveActEdit('${act.id}', event)" title="저장">💾</button>
+                        </div>
+                    `;
+                } else {
+                    actDiv.innerHTML = `
+                        <div class="act-header" onclick="selectAct('${act.id}')">
+                            <span style="flex:1;">${act.name}</span>
+                            <div style="display:flex; gap:5px;">
+                                <button class="btn-icon" onclick="startActEdit('${act.id}', event)">✏️</button>
+                                <button class="btn-icon" onclick="toggleActCollapse('${act.id}', event)">${act.collapsed ? '▼' : '▲'}</button>
+                            </div>
+                        </div>
+                    `;
+                }
+                container.appendChild(actDiv);
+
+                if (!act.collapsed) {
+                    act.scenes.forEach(scene => {
+                        const sceneDiv = document.createElement('div');
+                        sceneDiv.className = `item-card scene-card ${scene.id === currentSceneId ? 'active' : ''}`;
+                        
+                        if (editingSceneId === scene.id) {
+                            sceneDiv.innerHTML = `
+                                <input type="text" id="edit-scene-${scene.id}" value="${scene.name}" class="edit-input" style="flex:1;" onclick="event.stopPropagation()">
+                                <button class="btn-icon btn-danger" onclick="deleteScene('${act.id}', '${scene.id}')" title="장면 삭제">🗑️</button>
+                                <button class="btn-icon" onclick="saveSceneEdit('${act.id}', '${scene.id}', event)" title="저장">💾</button>
+                            `;
+                            sceneDiv.onclick = (e) => e.stopPropagation();
+                        } else {
+                            sceneDiv.innerHTML = `
+                                <span style="flex:1;">${scene.name}</span>
+                                <button class="btn-icon" onclick="startSceneEdit('${scene.id}', event)">✏️</button>
+                            `;
+                            sceneDiv.onclick = () => selectScene(act.id, scene.id);
+                        }
+                        container.appendChild(sceneDiv);
+                    });
+                }
+            });
+        }
+
+        function getCurrentAct() { return appData.acts.find(a => a.id === currentActId); }
+        function getCurrentScene() {
+            const act = getCurrentAct();
+            return act ? act.scenes.find(s => s.id === currentSceneId) : null;
+        }
+
+        // --- 우측 패널 로직 (등장인물) ---
+        let editingCharId = null;
+
+        function addCharacter() {
+            const name = document.getElementById('new-char-name').value;
+            const color = document.getElementById('new-char-color').value;
+            if (!name) return alert("이름을 입력하세요.");
+            
+            saveState();
+            appData.characters.push({ id: generateId(), name, color });
+            document.getElementById('new-char-name').value = '';
+            renderCharList();
+        }
+
+        function deleteChar(charId) {
+            if(!confirm("이 인물을 삭제하시겠습니까? (모든 장면에서 배치된 동선도 삭제됩니다.)")) return;
+            saveState();
+            
+            appData.characters = appData.characters.filter(c => c.id !== charId);
+            if (selectedCharId === charId) selectedCharId = null;
+            
+            appData.acts.forEach(act => {
+                act.scenes.forEach(scene => {
+                    if (scene.placements[charId]) delete scene.placements[charId];
+                });
+            });
+            
+            editingCharId = null;
+            renderAll();
+        }
+
+        function renderCharList() {
+            const container = document.getElementById('char-list');
+            container.innerHTML = '';
+            appData.characters.forEach(char => {
+                const div = document.createElement('div');
+                div.className = `item-card ${char.id === selectedCharId ? 'active' : ''}`;
+                
+                if (editingCharId === char.id) {
+                    div.innerHTML = `
+                        <input type="color" id="edit-color-${char.id}" value="${char.color}" style="width:25px; height:25px; border:none; padding:0;">
+                        <input type="text" id="edit-name-${char.id}" value="${char.name}" class="edit-input" style="flex:1; margin: 0 5px;">
+                        <button class="btn-icon btn-danger" onclick="deleteChar('${char.id}')" title="삭제">🗑️</button>
+                        <button class="btn-icon" onclick="saveCharEdit('${char.id}', event)" title="저장">💾</button>
+                    `;
+                } else {
+                    div.innerHTML = `
+                        <div class="char-item-content" onclick="selectCharToPlace('${char.id}')">
+                            <span class="char-color-dot" style="background:${char.color};"></span>
+                            <span>${char.name}</span>
+                        </div>
+                        <div style="display:flex; gap:5px;">
+                            <button class="btn-icon" onclick="startCharEdit('${char.id}', event)">✏️</button>
+                        </div>
+                    `;
+                }
+                container.appendChild(div);
+            });
+        }
+
+        function selectCharToPlace(id) {
+            selectedCharId = id;
+            document.getElementById('stage-mode').value = 'place';
+            renderCharList();
+        }
+
+        function startCharEdit(id, e) { e.stopPropagation(); editingCharId = id; renderCharList(); }
+
+        function saveCharEdit(id, e) {
+            e.stopPropagation();
+            const newName = document.getElementById(`edit-name-${id}`).value;
+            const newColor = document.getElementById(`edit-color-${id}`).value;
+            if (newName.trim() === '') return alert("이름을 입력하세요.");
+            
+            saveState();
+            const char = appData.characters.find(c => c.id === id);
+            char.name = newName;
+            char.color = newColor;
+            editingCharId = null;
+            renderCharList();
+            renderCharactersOnStage();
+        }
+
+        // --- 중앙 무대 로직 ---
+        function updateGridSize() { renderStage(); }
+
+        function renderStage() {
+            const cols = parseInt(document.getElementById('grid-cols').value);
+            const rows = parseInt(document.getElementById('grid-rows').value);
+            const gridSize = 40;
+            const wrapper = document.getElementById('stage-wrapper');
+            const canvas = document.getElementById('grid-canvas');
+            
+            const width = cols * gridSize;
+            const height = rows * gridSize;
+            
+            wrapper.style.width = width + 'px';
+            wrapper.style.height = height + 'px';
+            canvas.width = width;
+            canvas.height = height;
+            
+            const ctx = canvas.getContext('2d');
+            ctx.clearRect(0, 0, width, height);
+            
+            ctx.strokeStyle = '#e1e5eb';
+            ctx.lineWidth = 1;
+            for(let x=0; x<=width; x+=gridSize) { ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, height); ctx.stroke(); }
+            for(let y=0; y<=height; y+=gridSize) { ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(width, y); ctx.stroke(); }
+            
+            const act = getCurrentAct();
+            if (act && act.curtains) {
+                act.curtains.forEach(line => {
+                    ctx.beginPath();
+                    ctx.moveTo(line.x1 * gridSize, line.y1 * gridSize);
+                    ctx.lineTo(line.x2 * gridSize, line.y2 * gridSize);
+                    
+                    if (selectedObject && selectedObject.type === 'curtain' && selectedObject.curtainId === line.id) {
+                        ctx.strokeStyle = 'rgba(255, 59, 48, 0.8)'; ctx.lineWidth = 6; ctx.stroke();
+                    } else {
+                        ctx.strokeStyle = '#2c3e50'; ctx.lineWidth = 4; ctx.stroke();
+                    }
+                });
+            }
+
+            if (document.getElementById('stage-mode').value === 'draw' && drawStartPoint && mouseHoverGrid) {
+                ctx.strokeStyle = '#ff9f43'; ctx.setLineDash([6, 6]); ctx.lineWidth = 3;
+                ctx.beginPath();
+                ctx.moveTo(drawStartPoint.x * gridSize, drawStartPoint.y * gridSize);
+                ctx.lineTo(mouseHoverGrid.x * gridSize, mouseHoverGrid.y * gridSize);
+                ctx.stroke(); ctx.setLineDash([]); 
+            }
+
+            // 가림막 선택 툴바 위치 제어
+            const curtainToolbar = document.getElementById('curtain-toolbar');
+            if (selectedObject && selectedObject.type === 'curtain') {
+                const line = act.curtains.find(c => c.id === selectedObject.curtainId);
+                if (line) {
+                    const cx = ((line.x1 + line.x2) / 2) * gridSize;
+                    const cy = ((line.y1 + line.y2) / 2) * gridSize;
+                    curtainToolbar.style.left = cx + 'px';
+                    curtainToolbar.style.top = cy + 'px';
+                    curtainToolbar.classList.add('active');
+                } else {
+                    curtainToolbar.classList.remove('active');
+                }
+            } else {
+                curtainToolbar.classList.remove('active');
+                showCurtainDeleteConfirm(false);
+            }
+
+            renderCharactersOnStage();
+        }
+
+        function distToSegment(px, py, x1, y1, x2, y2) {
+            const l2 = (x1-x2)*(x1-x2) + (y1-y2)*(y1-y2);
+            if (l2 === 0) return Math.hypot(px-x1, py-y1);
+            let t = ((px - x1)*(x2 - x1) + (py - y1)*(y2 - y1)) / l2;
+            t = Math.max(0, Math.min(1, t));
+            return Math.hypot(px - (x1 + t * (x2 - x1)), py - (y1 + t * (y2 - y1)));
+        }
+
+        function handleStageClick(e) {
+            const mode = document.getElementById('stage-mode').value;
+            const wrapper = document.getElementById('stage-wrapper');
+            const rect = wrapper.getBoundingClientRect();
+            const gridSize = 40;
+            
+            const clientX = e.touches ? e.touches[0].clientX : e.clientX;
+            const clientY = e.touches ? e.touches[0].clientY : e.clientY;
+
+            const gridX = Math.round((clientX - rect.left) / gridSize);
+            const gridY = Math.round((clientY - rect.top) / gridSize);
+            const exactX = (clientX - rect.left) / gridSize;
+            const exactY = (clientY - rect.top) / gridSize;
+
+            const act = getCurrentAct();
+
+            if (mode === 'place') {
+                if (activeBubbleCharId) {
+                    activeBubbleCharId = null;
+                    showCharDeleteConfirmState = false;
+                    renderStage();
+                    return;
+                }
+                
+                let clickedCurtain = null;
+                if (act && act.curtains) {
+                    for (let c of act.curtains) {
+                        if (distToSegment(exactX, exactY, c.x1, c.y1, c.x2, c.y2) < 0.3) {
+                            clickedCurtain = c; break;
+                        }
+                    }
+                }
+
+                if (clickedCurtain) {
+                    selectedObject = { type: 'curtain', actId: currentActId, curtainId: clickedCurtain.id };
+                    selectedCharId = null;
+                    showCurtainDeleteConfirmState = false;
+                    renderCharList();
+                    renderStage();
+                    return;
+                }
+                
+                if (selectedCharId) {
+                    const scene = getCurrentScene();
+                    if (scene) {
+                        saveState();
+                        scene.placements[selectedCharId] = { x: gridX, y: gridY, note: scene.placements[selectedCharId]?.note || '' };
+                        selectedObject = { type: 'char', actId: currentActId, sceneId: currentSceneId, charId: selectedCharId };
+                        renderStage();
+                    } else {
+                        alert("장면을 먼저 선택해주세요.");
+                    }
+                } else {
+                    selectedObject = null;
+                    renderStage();
+                }
+            } else if (mode === 'draw') {
+                if (!act) return alert("막을 먼저 선택해주세요.");
+                
+                if (!drawStartPoint) {
+                    drawStartPoint = {x: gridX, y: gridY};
+                } else {
+                    saveState();
+                    if (!act.curtains) act.curtains = [];
+                    act.curtains.push({ id: generateId(), x1: drawStartPoint.x, y1: drawStartPoint.y, x2: gridX, y2: gridY });
+                    drawStartPoint = null;
+                    renderStage();
+                }
+            }
+        }
+
+        function renderCharactersOnStage() {
+            const layer = document.getElementById('characters-layer');
+            const gridSize = 40;
+            const scene = getCurrentScene();
+            
+            const currentDOMChars = Array.from(layer.children);
+            const placedIds = scene ? Object.keys(scene.placements) : [];
+
+            currentDOMChars.forEach(el => {
+                const charId = el.getAttribute('data-char-id');
+                if (!placedIds.includes(charId)) {
+                    el.style.opacity = '0';
+                    setTimeout(() => { if(el.parentNode) el.remove(); }, 300);
+                }
+            });
+
+            if(!scene) return;
+
+            placedIds.forEach(charId => {
+                const pos = scene.placements[charId];
+                const charData = appData.characters.find(c => c.id === charId);
+                if (!charData) return;
+
+                let charEl = layer.querySelector(`[data-char-id="${charId}"]`);
+                const isSelected = selectedObject && selectedObject.type === 'char' && selectedObject.charId === charId && selectedObject.sceneId === currentSceneId;
+                const isBubbleActive = activeBubbleCharId === charId;
+                
+                if (!charEl) {
+                    charEl = document.createElement('div');
+                    charEl.className = 'char-marker';
+                    charEl.setAttribute('data-char-id', charId);
+                    charEl.style.opacity = '0'; 
+                    
+                    charEl.innerHTML = `
+                        <span class="char-name-txt"></span>
+                        <div class="mini-bubble">💬</div>
+                        <div class="speech-bubble" onclick="event.stopPropagation()">
+                            <div class="bubble-normal-view">
+                                <textarea placeholder="대사 또는 동선 주석..."></textarea>
+                                <div class="bubble-actions">
+                                    <button class="btn btn-primary btn-save-bubble" style="padding:4px 10px; font-size:12px; flex:1;">저장</button>
+                                    <button class="btn btn-danger" style="padding:4px 8px; font-size:12px;" onclick="showCharDeleteConfirm(true)" title="인물 삭제">🗑️</button>
+                                </div>
+                            </div>
+                            <div class="bubble-confirm-view" style="display:none; text-align:center; padding:5px 0;">
+                                <p style="color:var(--danger); font-weight:600; font-size:0.85rem; margin-bottom:10px;">정말 삭제하시겠습니까?</p>
+                                <div style="display:flex; gap:8px; justify-content:center;">
+                                    <button class="btn" style="padding:6px 12px; font-size:0.8rem;" onclick="showCharDeleteConfirm(false)">취소</button>
+                                    <button class="btn btn-primary" style="padding:6px 12px; font-size:0.8rem; background:var(--danger);" onclick="deleteSelectedObject()">삭제</button>
+                                </div>
+                            </div>
+                        </div>
+                    `;
+                    layer.appendChild(charEl);
+                    
+                    charEl.onclick = (e) => {
+                        e.stopPropagation();
+                        selectedObject = { type: 'char', actId: currentActId, sceneId: currentSceneId, charId: charId };
+                        
+                        if (activeBubbleCharId === charId) {
+                            activeBubbleCharId = null;
+                        } else {
+                            activeBubbleCharId = charId;
+                            showCharDeleteConfirmState = false;
+                        }
+                        renderStage();
+                    };
+
+                    const textarea = charEl.querySelector('textarea');
+                    const saveBtn = charEl.querySelector('.btn-save-bubble');
+                    
+                    saveBtn.onclick = (e) => {
+                        e.stopPropagation();
+                        saveState();
+                        scene.placements[charId].note = textarea.value;
+                        activeBubbleCharId = null; 
+                        renderStage();
+                    };
+
+                    setTimeout(() => { charEl.style.opacity = '1'; }, 10);
+                } else {
+                    charEl.style.opacity = '1';
+                }
+
+                charEl.querySelector('.char-name-txt').innerText = charData.name.charAt(0);
+                charEl.style.backgroundColor = charData.color;
+                
+                if (isSelected) charEl.classList.add('selected');
+                else charEl.classList.remove('selected');
+
+                charEl.style.left = (pos.x * gridSize) + 'px';
+                charEl.style.top = (pos.y * gridSize) + 'px';
+
+                const bubble = charEl.querySelector('.speech-bubble');
+                const textarea = charEl.querySelector('textarea');
+                const normalView = charEl.querySelector('.bubble-normal-view');
+                const confirmView = charEl.querySelector('.bubble-confirm-view');
+                
+                if(textarea.value !== pos.note) textarea.value = pos.note || '';
+                
+                if(pos.note && pos.note.trim() !== '') charEl.classList.add('has-note');
+                else charEl.classList.remove('has-note');
+
+                if (isBubbleActive) {
+                    bubble.classList.add('active');
+                    if (showCharDeleteConfirmState) {
+                        normalView.style.display = 'none';
+                        confirmView.style.display = 'block';
+                    } else {
+                        normalView.style.display = 'block';
+                        confirmView.style.display = 'none';
+                    }
+                } else {
+                    bubble.classList.remove('active');
+                }
+            });
+        }
+
+        function renderAll() {
+            renderScriptList();
+            renderCharList();
+            renderStage();
+        }
+
+        // --- 재생 컨트롤 ---
+        function getFlatSceneList() {
+            let list = [];
+            appData.acts.forEach(act => {
+                act.scenes.forEach(scene => list.push({ actId: act.id, sceneId: scene.id }));
+            });
+            return list;
+        }
+
+        function prevScene() {
+            const list = getFlatSceneList();
+            const currIdx = list.findIndex(s => s.sceneId === currentSceneId);
+            if (currIdx > 0) selectScene(list[currIdx-1].actId, list[currIdx-1].sceneId);
+        }
+
+        function nextScene() {
+            const list = getFlatSceneList();
+            const currIdx = list.findIndex(s => s.sceneId === currentSceneId);
+            if (currIdx >= 0 && currIdx < list.length - 1) {
+                selectScene(list[currIdx+1].actId, list[currIdx+1].sceneId);
+                return true;
+            }
+            return false;
+        }
+
+        function togglePlay() {
+            const btn = document.getElementById('btn-play');
+            
+            if (!currentSceneId && currentActId) {
+                const act = getCurrentAct();
+                if (act && act.scenes.length > 0) {
+                    selectScene(act.id, act.scenes[0].id);
+                }
+            }
+
+            if (playIntervalId) {
+                clearInterval(playIntervalId);
+                playIntervalId = null;
+                btn.innerText = '▶ 재생';
+                btn.classList.remove('active');
+            } else {
+                btn.innerText = '⏸ 정지';
+                btn.classList.add('active');
+                const interval = parseInt(document.getElementById('play-interval').value) * 1000;
+                
+                playIntervalId = setInterval(() => {
+                    const hasNext = nextScene();
+                    if (!hasNext) {
+                        clearInterval(playIntervalId);
+                        playIntervalId = null;
+                        btn.innerText = '▶ 재생';
+                    }
+                }, interval);
+            }
+        }
+
+        // --- URL 무손실 압축 공유 (Pako) ---
+        function uint8ToBase64(u8Arr) {
+            const CHUNK_SIZE = 0x8000; 
+            let c = [];
+            for (let i = 0; i < u8Arr.length; i += CHUNK_SIZE) {
+                c.push(String.fromCharCode.apply(null, u8Arr.subarray(i, i + CHUNK_SIZE)));
+            }
+            return btoa(c.join(""));
+        }
+
+        function base64ToUint8(b64) {
+            const binary_string = atob(b64);
+            const len = binary_string.length;
+            const bytes = new Uint8Array(len);
+            for (let i = 0; i < len; i++) {
+                bytes[i] = binary_string.charCodeAt(i);
+            }
+            return bytes;
+        }
+
+        function shareData() {
+            try {
+                const jsonStr = JSON.stringify(appData);
+                const uint8Arr = new TextEncoder().encode(jsonStr);
+                const compressed = pako.deflate(uint8Arr);
+                const base64Safe = uint8ToBase64(compressed).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+                
+                const baseUrl = window.location.href.split('?')[0].split('#')[0];
+                const newUrl = `${baseUrl}#/data:${base64Safe}`;
+                
+                navigator.clipboard.writeText(newUrl).then(() => {
+                    alert('성공적으로 저장되어 클립보드에 복사되었습니다!');
+                    history.pushState(null, '', newUrl); 
+                }).catch(() => {
+                    alert('복사 실패. 브라우저 보안 설정을 확인하세요.');
+                });
+            } catch (e) {
+                console.error(e);
+                alert('데이터 압축 중 오류가 발생했습니다.');
+            }
+        }
+
+        function loadFromUrl() {
+            const hash = window.location.hash;
+            if (hash.startsWith('#/data:')) {
+                const encodedData = hash.replace('#/data:', '');
+                try {
+                    let b64 = encodedData.replace(/-/g, '+').replace(/_/g, '/');
+                    while (b64.length % 4) { b64 += '='; }
+                    
+                    const compressed = base64ToUint8(b64);
+                    const decompressed = pako.inflate(compressed);
+                    const jsonStr = new TextDecoder().decode(decompressed);
+                    const loadedData = JSON.parse(jsonStr);
+                    
+                    if (loadedData.acts && loadedData.characters) {
+                        loadedData.acts.forEach(act => {
+                            if (!act.curtains) act.curtains = [];
+                            if (act.collapsed === undefined) act.collapsed = false;
+                        });
+                        appData = loadedData;
+                        
+                        if (appData.acts.length > 0) {
+                            currentActId = appData.acts[0].id;
+                            if(appData.acts[0].scenes.length > 0) currentSceneId = appData.acts[0].scenes[0].id;
+                        }
+                    }
+                } catch (e) {
+                    console.error("데이터 로딩 실패", e);
+                    alert("손상된 링크입니다. 빈 프로젝트로 시작합니다.");
+                    history.pushState(null, '', window.location.href.split('#')[0]);
+                }
+            }
+        }
+    </script>
+</body>
+</html>
