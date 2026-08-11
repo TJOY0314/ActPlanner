@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>연극 동선 기획 시뮬레이터</title>
+    <title>연극 동선 편집기</title>
     <!-- 압축을 위한 pako 라이브러리 로드 -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/pako/2.1.0/pako.min.js"></script>
     <style>
@@ -69,11 +69,21 @@
         .center-stage::-webkit-scrollbar-thumb { background: #7f8fa6; border-radius: 8px; border: 3px solid #dcdde1; }
         .center-stage::-webkit-scrollbar-thumb:hover { background: #353b48; }
 
-        /* Panel Toggle Buttons - Always Visible */
-        .panel-toggle { position: absolute; top: 50%; transform: translateY(-50%); z-index: 101; background: var(--primary); color: white; border: none; padding: 20px 10px; cursor: pointer; box-shadow: 0 4px 15px rgba(0,0,0,0.3); font-weight: bold; font-size: 0.9rem; transition: background 0.2s, transform 0.3s; }
+        /* Panel Toggle Buttons - 서랍 끝단에 고정되어 함께 이동 */
+        .panel-toggle { 
+            position: absolute; top: 50%; transform: translateY(-50%); 
+            z-index: 101; background: var(--primary); color: white; border: none; 
+            padding: 20px 8px; cursor: pointer; box-shadow: 0 4px 15px rgba(0,0,0,0.2); 
+            font-weight: bold; font-size: 0.85rem; 
+            transition: left 0.3s cubic-bezier(0.4, 0.0, 0.2, 1), right 0.3s cubic-bezier(0.4, 0.0, 0.2, 1), background 0.2s; 
+        }
         .panel-toggle:hover { background: #357abd; }
-        .left-toggle { left: 0; border-radius: 0 12px 12px 0; }
-        .right-toggle { right: 0; border-radius: 12px 0 0 12px; }
+        
+        #left-panel-toggle { left: 0; border-radius: 0 12px 12px 0; }
+        #left-panel-toggle.open { left: 320px; }
+
+        #right-panel-toggle { right: 0; border-radius: 12px 0 0 12px; }
+        #right-panel-toggle.open { right: 320px; }
         
         /* Panels & Lists */
         h2 { font-size: 1.1rem; margin-bottom: 15px; padding-bottom: 8px; border-bottom: 2px solid var(--border); }
@@ -178,9 +188,7 @@
     </header>
 
     <main>
-        <button id="left-panel-toggle" class="panel-toggle left-toggle" onclick="toggleLeftPanel()">▶ 막/장</button>
-        <button id="right-panel-toggle" class="panel-toggle right-toggle" onclick="toggleRightPanel()">인물 ◀</button>
-
+        <button id="left-panel-toggle" class="panel-toggle left-toggle" onclick="toggleLeftPanel()">막/장 ▶</button>
         <aside class="side-panel" id="left-panel">
             <h2>막 / 장면 목록</h2>
             <div id="script-list" class="list-container"></div>
@@ -241,6 +249,7 @@
                 • <b>줌(확대/축소):</b> 마우스 휠 또는 두 손가락 핀치 줌
             </div>
         </aside>
+        <button id="right-panel-toggle" class="panel-toggle right-toggle" onclick="toggleRightPanel()">◀ 인물</button>
     </main>
 
     <footer>
@@ -274,8 +283,33 @@
         };
 
         function generateId() { return Math.random().toString(36).substr(2, 9); }
-        function toggleLeftPanel() { const panel = document.getElementById('left-panel'); const toggleBtn = document.getElementById('left-panel-toggle'); panel.classList.toggle('panel-open'); toggleBtn.innerText = panel.classList.contains('panel-open') ? '◀ 닫기' : '▶ 막/장'; if(panel.classList.contains('panel-open')) { document.getElementById('right-panel').classList.remove('panel-open'); document.getElementById('right-panel-toggle').innerText = '인물 ◀'; } }
-        function toggleRightPanel() { const panel = document.getElementById('right-panel'); const toggleBtn = document.getElementById('right-panel-toggle'); panel.classList.toggle('panel-open'); toggleBtn.innerText = panel.classList.contains('panel-open') ? '닫기 ▶' : '인물 ◀'; if(panel.classList.contains('panel-open')) { document.getElementById('left-panel').classList.remove('panel-open'); document.getElementById('left-panel-toggle').innerText = '▶ 막/장'; } }
+        
+        function toggleLeftPanel() { 
+            const panel = document.getElementById('left-panel'); 
+            const toggleBtn = document.getElementById('left-panel-toggle'); 
+            panel.classList.toggle('panel-open'); 
+            toggleBtn.classList.toggle('open');
+            toggleBtn.innerText = panel.classList.contains('panel-open') ? '◀ 닫기' : '막/장 ▶'; 
+            if(panel.classList.contains('panel-open')) { 
+                document.getElementById('right-panel').classList.remove('panel-open'); 
+                document.getElementById('right-panel-toggle').classList.remove('open');
+                document.getElementById('right-panel-toggle').innerText = '◀ 인물'; 
+            } 
+        }
+        
+        function toggleRightPanel() { 
+            const panel = document.getElementById('right-panel'); 
+            const toggleBtn = document.getElementById('right-panel-toggle'); 
+            panel.classList.toggle('panel-open'); 
+            toggleBtn.classList.toggle('open');
+            toggleBtn.innerText = panel.classList.contains('panel-open') ? '닫기 ▶' : '◀ 인물'; 
+            if(panel.classList.contains('panel-open')) { 
+                document.getElementById('left-panel').classList.remove('panel-open'); 
+                document.getElementById('left-panel-toggle').classList.remove('open');
+                document.getElementById('left-panel-toggle').innerText = '막/장 ▶'; 
+            } 
+        }
+
         function updateHeaderInputs() { document.getElementById('project-name').value = appData.projectName || '연극 동선 기획'; document.getElementById('project-version').value = appData.projectVersion || 'v1.0'; }
         function syncHeaderToData() { appData.projectName = document.getElementById('project-name').value; appData.projectVersion = document.getElementById('project-version').value; }
         
@@ -303,7 +337,6 @@
         function setupEventListeners() {
             const centerStage = document.getElementById('center-stage');
             
-            // --- 마우스 휠 줌 (확대/축소) 복원 ---
             centerStage.addEventListener('wheel', (e) => {
                 e.preventDefault();
                 const delta = e.deltaY > 0 ? -0.1 : 0.1;
@@ -328,7 +361,6 @@
             }, { passive: false });
             centerStage.addEventListener('touchend', (e) => { if (e.touches.length < 2) initialPinchDistance = null; });
 
-            // --- 마우스/터치 드래그 패닝 (화면 이동) 기능 ---
             let isDraggingStage = false;
             let startX, startY, scrollLeft, scrollTop;
 
@@ -382,7 +414,6 @@
             centerStage.addEventListener('touchmove', onDrag, { passive: true });
             window.addEventListener('touchend', stopDrag);
 
-            // --- 상호작용 레이어 (그리기, Hover 등) ---
             const interactionLayer = document.getElementById('interaction-layer');
             const handleMove = (e) => {
                 if (e.touches && e.touches.length > 1) return;
@@ -425,7 +456,6 @@
         function showCharDeleteConfirm(show) { showCharDeleteConfirmState = show; renderCharactersOnStage(); }
         function showCurtainDeleteConfirm(show) { showCurtainDeleteConfirmState = show; document.getElementById('curtain-normal-view').style.display = show ? 'none' : 'block'; document.getElementById('curtain-confirm-view').style.display = show ? 'block' : 'none'; }
 
-        // --- 좌우 패널 ---
         let editingActId = null, editingSceneId = null, editingCharId = null;
         function addAct() { saveState(); const act = { id: generateId(), name: `${appData.acts.length + 1}막`, collapsed: false, curtains: [], scenes: [] }; appData.acts.push(act); currentActId = act.id; currentSceneId = null; renderScriptList(); renderStage(); }
         function addScene() { if (!currentActId) return alert("막 선택 요망."); saveState(); const act = appData.acts.find(a => a.id === currentActId); const scene = { id: generateId(), name: `${act.scenes.length + 1}장`, placements: {} }; act.scenes.push(scene); act.collapsed = false; currentSceneId = scene.id; activeBubbleCharId = null; selectedObject = null; renderScriptList(); renderCharactersOnStage(); }
